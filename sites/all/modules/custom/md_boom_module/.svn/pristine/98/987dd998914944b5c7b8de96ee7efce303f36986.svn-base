@@ -1,0 +1,7 @@
+<?php
+/**
+ * hook_install
+ */
+function md_boom_module_install() {
+
+}

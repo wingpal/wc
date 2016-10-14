@@ -1,0 +1,426 @@
+<?php
+function md_boom_module_menu(){
+    $items['md_boom_module/tweet'] = array(
+        'title' => t('Twitter Feed'),
+        'description' => t('Display lastest tweet of twitter account'),
+        'page callback' => 'tweet_content',
+        'access callback' => true,
+        'access arguments' => array('access content'),
+    );
+    $items['ajax_node'] = array(
+        'page callback' => 'ajax_node',
+        'access callback' => true,
+        'access arguments' => array('access content'),
+    );
+    return $items;
+}
+/**
+ * Get only node and comment html data
+ */
+function ajax_node(){
+    if(isset($_POST['nodeid'])){
+        $nid = $_POST['nodeid'];
+        $node = node_load($nid);
+        if($node->type == 'portfolio'){
+            $node_view = node_view($node,'teaser');
+            echo drupal_render($node_view);
+        }
+    }
+    if(isset($_GET['nid'])){
+        $nid = $_GET['nid'];
+        $node = node_load($nid);
+        if($node->type == 'blog'){
+            $node_view = node_view($node,'full');
+            $node_view['comments'] = comment_node_page_additions($node);
+            echo drupal_render($node_view);
+        }
+    }
+}
+/**
+ * Get json data from twitter with OAuth library
+ */
+function tweet_content(){
+    $consumer_key = variable_get('twitter_consumer_key');
+
+    $consumer_secret = variable_get('twitter_consumer_secret');
+
+    $access_token = variable_get('twitter_access_token');
+
+    $secret_token = variable_get('twitter_access_token_secret');
+
+    if(empty($consumer_key) || empty($consumer_secret) || empty($access_token) || empty($secret_token)) { die(); }
+    class ezTweet {
+        /*************************************** config ***************************************/
+
+        // Path to tmhOAuth libraries
+        private $lib = './lib/';
+
+        // Enable caching
+        private $cache_enabled = false;
+
+        // Cache interval (minutes)
+        private $cache_interval = 15;
+
+        // Path to writable cache directory
+        private $cache_dir = './cache';
+
+        // Enable debugging
+        private $debug = true;
+
+        /**************************************************************************************/
+
+        public function __construct() {
+            // Initialize paths and etc.
+            $this->pathify($this->cache_dir);
+            $this->pathify($this->lib);
+            $this->message = '';
+
+            // Set server-side debug params
+            if($this->debug === true) {
+                error_reporting(-1);
+            } else {
+                error_reporting(0);
+            }
+        }
+
+        public function fetch() {
+            echo json_encode(
+                array(
+                    'response' => json_decode($this->getJSON(), true),
+                    'message' => ($this->debug) ? $this->message : false
+                )
+            );
+
+        }
+
+        private function getJSON() {
+            if($this->cache_enabled === true) {
+                $CFID = $this->generateCFID();
+                $cache_file = $this->cache_dir.$CFID;
+
+                if(file_exists($cache_file) && (filemtime($cache_file) > (time() - 60 * intval($this->cache_interval)))) {
+                    return file_get_contents($cache_file, FILE_USE_INCLUDE_PATH);
+                } else {
+
+                    $JSONraw = $this->getTwitterJSON();
+                    $JSON = $JSONraw['response'];
+
+                    // Don't write a bad cache file if there was a CURL error
+                    if($JSONraw['errno'] != 0) {
+                        $this->consoleDebug($JSONraw['error']);
+                        return $JSON;
+                    }
+
+                    if($this->debug === true) {
+                        // Check for twitter-side errors
+                        $pj = json_decode($JSON, true);
+                        if(isset($pj['errors'])) {
+                            foreach($pj['errors'] as $error) {
+                                $message = 'Twitter Error: "'.$error['message'].'", Error Code #'.$error['code'];
+                                $this->consoleDebug($message);
+                            }
+                            return false;
+                        }
+                    }
+
+                    if(is_writable($this->cache_dir) && $JSONraw) {
+                        if(file_put_contents($cache_file, $JSON, LOCK_EX) === false) {
+                            $this->consoleDebug("Error writing cache file");
+                        }
+                    } else {
+                        $this->consoleDebug("Cache directory is not writable");
+                    }
+                    return $JSON;
+                }
+            } else {
+                $JSONraw = $this->getTwitterJSON();
+
+                if($this->debug === true) {
+                    // Check for CURL errors
+                    if($JSONraw['errno'] != 0) {
+                        $this->consoleDebug($JSONraw['error']);
+                    }
+
+                    // Check for twitter-side errors
+                    $pj = json_decode($JSONraw['response'], true);
+                    if(isset($pj['errors'])) {
+                        foreach($pj['errors'] as $error) {
+                            $message = 'Twitter Error: "'.$error['message'].'", Error Code #'.$error['code'];
+                            $this->consoleDebug($message);
+                        }
+                        return false;
+                    }
+                }
+                return $JSONraw['response'];
+            }
+        }
+
+        private function getTwitterJSON() {
+            $path = drupal_get_path('module','md_boom_module');
+            include_once($path.'/twitter/lib/tmhOAuth.php');
+            include_once($path.'/twitter/lib/tmhUtilities.php');
+
+
+            $tmhOAuth = new tmhOAuth(array(
+                'host'                  => $_POST['request']['host'],
+                'consumer_key'          => variable_get('twitter_consumer_key'),
+                'consumer_secret'       => variable_get('twitter_consumer_secret'),
+                'user_token'            => variable_get('twitter_access_token'),
+                'user_secret'           => variable_get('twitter_access_token_secret'),
+                'curl_ssl_verifypeer'   => false
+            ));
+
+            $url = $_POST['request']['url'];
+            $params = $_POST['request']['parameters'];
+
+            $tmhOAuth->request('GET', $tmhOAuth->url($url), $params);
+            return $tmhOAuth->response;
+        }
+
+        private function generateCFID() {
+            // The unique cached filename ID
+            return md5(serialize($_POST)).'.json';
+        }
+
+        private function pathify(&$path) {
+            // Ensures our user-specified paths are up to snuff
+            $path = realpath($path).'/';
+        }
+
+        private function consoleDebug($message) {
+            if($this->debug === true) {
+                $this->message .= 'tweet.js: '.$message."\n";
+            }
+        }
+    }
+
+    $ezTweet = new ezTweet();
+    $ezTweet->fetch();
+}
+/*
+ * Hook_block_info
+ */
+function md_boom_module_block_info() {
+    $blocks['menu'] = array(
+        'info' => t('Md Boom One-page Main Menu'), //The name that will appear in the block list.
+        'cache' => DRUPAL_CACHE_PER_ROLE, //Default
+    );
+    $blocks['twitter'] = array(
+        'info' => t('Twitter block'),
+        'cache' => DRUPAL_CACHE_PER_ROLE,
+    );
+    return $blocks;
+}
+/*
+ * Hook_form_alter
+ */
+function md_boom_module_form_alter(&$form, &$form_state, $form_id){
+    switch($form_id){
+        case 'menu_edit_item':
+            kpr($form);
+            $enable_menu_scroll = variable_get('enable-scroll-menu-'.$form['mlid']['#value']);
+            $menu_scrollto_path = variable_get('menu-'.$form['mlid']['#value'].'-scrollto-path');
+            $form['description']['#weight'] = '3';
+            $form['enabled']['#weight'] = '4';
+            $form['expanded']['#weight'] = '5';
+            $form['parent']['#weight'] = '6';
+            $form['weight']['#weight'] = '7';
+            $form['link_path']['#weight'] = '1';
+            $form['enable_menu_scroll'] = array(
+                '#type' => 'checkbox',
+                '#title'    => t('Enable Menu Scroll'),
+                '#description'  => t('Uncheck if you dont want to make a scroll-to-path menu'),
+                '#default_value'    => isset($enable_menu_scroll) ? $enable_menu_scroll : 1,
+                '#weight' => 2,
+            );
+            $form['jquery_scrollto_path'] = array(
+                '#type' => 'select',
+                '#title' => t('Jquery ScrollTo Path'),
+                '#description' => t('Path for Jquery ScrollTo Menu'),
+                '#default_value' => isset($menu_scrollto_path) ? $menu_scrollto_path : '',
+                '#options' => array(
+                    '#index' => t('Index'),
+                    '#content1' => t('Content 1'),
+                    '#content2' => t('Content 2'),
+                    '#content3' => t('Content 3'),
+                    '#content4' => t('Content 4'),
+                    '#content5' => t('Content 5'),
+                    '#content6' => t('Content 6'),
+                ),
+                '#weight' => 2,
+                '#required' => TRUE,
+            );
+            $form['#submit'][] = 'md_boom_module_menu_edit_item_form_submit_handler';
+            break;
+    }
+    return $form;
+}
+/*
+ * Form edit menu submit handler
+ */
+function md_boom_module_menu_edit_item_form_submit_handler($form, &$form_state){
+    variable_set('menu-'.$form_state['values']['mlid'].'-scrollto-path',$form_state['values']['jquery_scrollto_path']);
+    variable_set('enable-scroll-menu-'.$form_state['values']['mlid'],$form_state['values']['enable_menu_scroll']);
+}
+
+/**
+ * Implement hook_block_view
+ * @return data
+ */
+function md_boom_module_block_view($delta = '') {
+    global $base_url;
+    $block = array();
+    switch($delta) {
+        case 'menu' :
+            $block['subject'] = t('<none>');
+            if (user_access('access content')) {
+                $menu = menu_navigation_links('main-menu');
+                $content = '<nav id="navigation">
+                                <div class="wrapper clearfix">
+                                    <a class="logo" href="'.$base_url.'"><img  src="'. $GLOBALS['base_url'] . '/' .drupal_get_path('theme','md_boom').'/sub-logo.png"/></a>
+                                    <ul id="menu" class="clearfix">';
+                foreach($menu as $key => $values):
+                    $menu_title = $values['title'];
+                    $enable_menu_scroll = variable_get('enable-scroll-'.$key.'');
+                    if($enable_menu_scroll == 1) {
+                        $menu_scrollto_path = variable_get(''.$key.'-scrollto-path');
+                        if(isset($values['icon']['icon'])) {
+                            $menu_icon = $values['icon']['icon'];
+                            if($menu_scrollto_path == '#index'){
+                                $content .= '<li class="current"><a href="'.$base_url.'/'.$menu_scrollto_path.'"><i class="'.$menu_icon.'"></i>'.$menu_title.'</a></li>';
+                            }
+                            else{
+                                $content .= '<li><a href="'.$base_url.'/'.$menu_scrollto_path.'"><i class="'.$menu_icon.'"></i>'.$menu_title.'</a></li>';
+                            }
+                        }
+                    } else {
+                        if($values['href'] == '<front>') {
+                            $content .= '<li><a href="'.$base_url.'"><i class="'.$menu_icon.'"></i>'.$menu_title.'</a></li>';
+                        } else {
+                            $content .= '<li><a href="'.$values['href'].'"><i class="'.$menu_icon.'"></i>'.$menu_title.'</a></li>';
+                        }
+                    }
+                endforeach;
+                $content .= '</ul>';
+                $content .= '<div id="dd-3" class="wrapper-dropdown-3" tabindex="1">
+                                    <span>Home</span>
+                                    <ul class="dropdown">';
+                foreach($menu as $key_dd => $value_dd):
+                    $menu_title_dd = $value_dd['title'];
+                    $menu_scrollto_path_dd = variable_get(''.$key_dd.'-scrollto-path');
+                    if(isset($value_dd['icon']['icon'])) {
+                        $menu_icon_dd = $value_dd['icon']['icon'];
+                        $content .= t('
+                                <li><a href="'.$menu_scrollto_path_dd.'"><i class="'.$menu_icon_dd.'"></i>'.$menu_title_dd.'</a></li>
+                              ');
+                    }
+                endforeach;
+                $content .= '</ul>
+                          </div>
+                       </div>
+                   </nav>';
+                $block['content'] = $content;
+            }
+            break;
+        case 'twitter':
+            $theme_path = drupal_get_path('theme','md_boom');
+            $block['subject'] = t('Latest Tweet');
+            $twitter_account = variable_get('twitter_username');
+            $twitter_max = variable_get('twitter_num');
+            if(isset($twitter_account) && isset($twitter_max)){
+                drupal_add_js(array('twitter_account'=>$twitter_account),'setting');
+                drupal_add_js(array('twitter_num'=>$twitter_max),'setting');
+                drupal_add_js(drupal_get_path('module', 'md_boom_module') . '/js/jquery.tweet.js');
+                drupal_add_js(drupal_get_path('module', 'md_boom_module') . '/js/script.js');
+            }
+            $block['content'] = '<div class="wrapper">
+                                  <aside class="widget">
+                                      <h5 class="widget-title"><img src="'.$base_url.'/'.$theme_path.'/images/onepage/twitter-logo.png" alt="" /></h5>
+                                      <div class="lst_tweet" id="sys_lst_tweets"></div>
+                                  </aside><!--end:widget-->
+                                </div><!--end:wrapper-->';
+            break;
+
+    }
+    return $block;
+}
+
+
+/**
+ * Implements mod_bonv_bl_block_configure().
+ * Creat form to input data from Twitter App
+ */
+function md_boom_module_block_configure($delta='') {
+    $form = array();
+
+    switch($delta) {
+        case 'twitter' :
+            // Text field form element
+            $form['twitter_settings'] = array(
+                '#type' => 'fieldset',
+                '#title' => t('Twitter Account Settings'),
+                '#description' => 'Modify your data from Twitter account',
+            );
+            $form['twitter_settings']['twitter_username'] = array(
+                '#type' => 'textfield',
+                '#title'    =>  t('Twitter username'),
+                '#size'         => '15',
+                '#required'      => true,
+                '#default_value'    => variable_get('twitter_username','')
+            );
+            $form['twitter_settings']['twitter_num'] = array(
+                '#type'     => 'textfield',
+                '#title'    => t('Tweets Posts'),
+                '#size'     => '5',
+                '#default_value'    => variable_get('twitter_num',''),
+            );
+            $form['twitter_settings']['twitter_consumer_key'] = array(
+                '#type' => 'textfield',
+                '#title' => t('Consumer key'),
+                '#description' => t('Enter your consumer key from your twitter app'),
+                '#maxlength' => '50',
+                '#default_value' => variable_get('twitter_consumer_key', ''),
+            );
+            $form['twitter_settings']['twitter_consumer_secret'] = array(
+                '#type' => 'textfield',
+                '#title' => t('Consumer secret'),
+                '#description' => t('Enter your consumer secret string from your twitter app'),
+                '#maxlength' => '50',
+                '#default_value' => variable_get('twitter_consumer_secret', ''),
+            );
+            $form['twitter_settings']['twitter_access_token'] = array(
+                '#type' => 'textfield',
+                '#title' => t('Access Token'),
+                '#description' => t('Enter your access token string from your twitter app'),
+                '#maxlength' => '50',
+                '#default_value' => variable_get('twitter_access_token', ''),
+            );
+            $form['twitter_settings']['twitter_access_token_secret'] = array(
+                '#type' => 'textfield',
+                '#title' => t('Access Token Secret'),
+                '#description' => t('Enter your access token secret string from your twitter app'),
+                '#maxlength' => '50',
+                '#default_value' => variable_get('twitter_access_token_secret', ''),
+            );
+
+            break;
+    }
+    return $form;
+}
+/**
+ * Implements md_boom_module_block_save().
+ * Save data
+ */
+function md_boom_module_block_save($delta = '', $edit = array()) {
+    switch($delta) {
+        case 'twitter' :
+            // Saving the user input twitter data
+            variable_set('twitter_username', $edit['twitter_username']);
+            variable_set('twitter_num', $edit['twitter_num']);
+            variable_set('twitter_consumer_key', $edit['twitter_consumer_key']);
+            variable_set('twitter_consumer_secret', $edit['twitter_consumer_secret']);
+            variable_set('twitter_access_token', $edit['twitter_access_token']);
+            variable_set('twitter_access_token_secret', $edit['twitter_access_token_secret']);
+            break;
+    }
+}
