@@ -2368,6 +2368,7 @@ h6 a:hover {
 }
 #main-content .pf-content p {color: #555;}
 .pf-detail-meta {
+	display: none;
 	border-top:1px solid #b3b3b3;
 	padding-top:20px;
 }
@@ -2931,6 +2932,7 @@ h6 a:hover {
 }
 
 .flx-gooogle-map .contact-info {
+	opacity: 0.6;
 	width:460px;
 	position:absolute;
 	top:50%;
@@ -3331,4 +3333,7 @@ p.textarea-block i {
 }
 .pf-detail-meta .skill-output {
     text-transform: capitalize;
+}
+#block-views-contact-block > div.flx-gooogle-map > div.contact-info > p:nth-child(8) {
+	display: none;
 }

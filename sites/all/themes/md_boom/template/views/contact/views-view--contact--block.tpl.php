@@ -28,7 +28,13 @@
         <?php if(theme_get_setting('phone')):?><p> <i class="icon-mobile"></i><?php print theme_get_setting('phone'); ?></p> <?php endif;?>
         <?php if(theme_get_setting('fax')):?><p> <i class="icon-stethoscope"></i><?php  print theme_get_setting('fax'); ?></p><?php endif;?>
     </div><!--end:contact-info-->
-    <div id="map_canvas"></div>
+    <div id="map_canvas"><iframe
+          width="100%"
+          height="100%"
+          frameborder="0" style="border:0"
+          src="https://www.google.com/maps/embed/v1/place?q=place_id:ChIJfbHvRGYQW0cREGONE4LbjaM&key=AIzaSyDLhPugSyCNDv9-hhAoJy8Yh-L15Fv2JGc"
+          allowfullscreen>
+        </iframe></div>
 </div><!--end:flx-gooogle-map-->
 
 

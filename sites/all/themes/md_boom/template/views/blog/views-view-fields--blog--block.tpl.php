@@ -38,7 +38,6 @@
             <div class="flx-entry-detail">
                 <h3 class="flx-entry-title"><span id="node-title"><span class="node-<?php print $view->name;?>-title"><a class="popup-ajax" href="?q=ajax_node&nid=<?php print $row->nid;?>"><?php print $fields['title']->content;?></a></span></span></h3>
                 <div class="flx-entry-meta clearfix">
-                    <span class="flx-entry-author"><i class="icon-user"></i><a href="#"><?php print $fields['name']->content;?></a></span>
                     <span class="flx-entry-date"><i class="icon-calendar"></i><?php print $fields['created']->content;?></span>
                     <span class="flx-entry-categories"><i class="icon-menu"></i><?php print $fields['term_node_tid']->content;?></span>
                 </div><!--end:flx-entry-meta-->
